@@ -199,450 +199,57 @@ public abstract class IssueListPanel extends Panel {
 	protected void onInitialize() {
 		super.onInitialize();
 
-		add(new AjaxLink<Void>("showSavedQueries") {
-
-			@Override
-			public void onEvent(IEvent<?> event) {
-				super.onEvent(event);
-				if (event.getPayload() instanceof SavedQueriesClosed) {
-					((SavedQueriesClosed) event.getPayload()).getHandler().add(this);
-				}
-			}
-			
-			@Override
-			protected void onConfigure() {
-				super.onConfigure();
-				setVisible(getQuerySaveSupport() != null && !getQuerySaveSupport().isSavedQueriesVisible());
-			}
-
-			@Override
-			public void onClick(AjaxRequestTarget target) {
-				send(getPage(), Broadcast.BREADTH, new SavedQueriesOpened(target));
-				target.add(this);
-			}
-			
-		}.setOutputMarkupPlaceholderTag(true));
+		addSavedQueriesLink();
 		
-		add(saveQueryLink = new AjaxLink<Void>("saveQuery") {
-
-			@Override
-			protected void onConfigure() {
-				super.onConfigure();
-				setEnabled(querySubmitted && queryModel.getObject() != null);
-				setVisible(SecurityUtils.getUser() != null && getQuerySaveSupport() != null);
-			}
-
-			@Override
-			protected void onComponentTag(ComponentTag tag) {
-				super.onComponentTag(tag);
-				configure();
-				if (!isEnabled()) 
-					tag.append("class", "disabled", " ");
-				if (!querySubmitted)
-					tag.put("title", "Query not submitted");
-				else if (queryModel.getObject() == null)
-					tag.put("title", "Can not save malformed query");
-			}
-
-			@Override
-			public void onClick(AjaxRequestTarget target) {
-				getQuerySaveSupport().onSaveQuery(target, queryModel.getObject().toString());
-			}		
-			
-		}.setOutputMarkupPlaceholderTag(true));
+		addSaveQueryLink();
 		
-		add(new DropdownLink("orderBy") {
-
-			@Override
-			protected Component newContent(String id, FloatingPanel dropdown) {
-				List<String> orderFields = new ArrayList<>(Issue.ORDER_FIELDS.keySet());
-				if (getProject() != null)
-					orderFields.remove(Issue.NAME_PROJECT);
-				for (FieldSpec field: getGlobalIssueSetting().getFieldSpecs()) {
-					if (field instanceof NumberField || field instanceof ChoiceField || field instanceof DateField) 
-						orderFields.add(field.getName());
-				}
-				
-				return new OrderEditPanel(id, orderFields, new IModel<List<EntitySort>> () {
-
-					@Override
-					public void detach() {
-					}
-
-					@Override
-					public List<EntitySort> getObject() {
-						IssueQuery query = parse(queryStringModel.getObject(), new IssueQuery());
-						IssueListPanel.this.getFeedbackMessages().clear();
-						if (query != null) 
-							return query.getSorts();
-						else
-							return new ArrayList<>();
-					}
-
-					@Override
-					public void setObject(List<EntitySort> object) {
-						IssueQuery query = parse(queryStringModel.getObject(), new IssueQuery());
-						IssueListPanel.this.getFeedbackMessages().clear();
-						if (query == null)
-							query = new IssueQuery();
-						query.getSorts().clear();
-						query.getSorts().addAll(object);
-						queryStringModel.setObject(query.toString());
-						AjaxRequestTarget target = RequestCycle.get().find(AjaxRequestTarget.class); 
-						target.add(queryInput);
-						doQuery(target);
-					}
-					
-				});
-			}
-			
-		});	
+		addQueriesDropDown();	
 		
-		queryInput = new TextField<String>("input", queryStringModel);
-		queryInput.add(new IssueQueryBehavior(new AbstractReadOnlyModel<Project>() {
-
-			@Override
-			public Project getObject() {
-				return getProject();
-			}
-			
-		}, true, true, false, false, false) {
-			
-			@Override
-			protected void onInput(AjaxRequestTarget target, String inputContent) {
-				IssueListPanel.this.getFeedbackMessages().clear();
-				querySubmitted = StringUtils.trimToEmpty(queryStringModel.getObject())
-						.equals(StringUtils.trimToEmpty(inputContent));
-				target.add(saveQueryLink);
-			}
-			
-		});
-		
-		queryInput.add(new AjaxFormComponentUpdatingBehavior("clear") {
-			
-			@Override
-			protected void onUpdate(AjaxRequestTarget target) {
-				doQuery(target);
-			}
-			
-		});
-		
-		Form<?> queryForm = new Form<Void>("query");
-		queryForm.add(queryInput);
-		queryForm.add(new AjaxButton("submit") {
-
-			@Override
-			protected void onSubmit(AjaxRequestTarget target, Form<?> form) {
-				super.onSubmit(target, form);
-				IssueListPanel.this.getFeedbackMessages().clear();
-				doQuery(target);
-			}
-			
-		});
-		add(queryForm);
+		addQueryForm();
 		
 		if (getProject() == null) {
-			add(new DropdownLink("newIssue") {
-
-				@Override
-				protected Component newContent(String id, FloatingPanel dropdown) {
-					return new ProjectSelector(id, new LoadableDetachableModel<Collection<Project>>() {
-	
-						@Override
-						protected Collection<Project> load() {
-							List<Project> projects = new ArrayList<>(OneDev.getInstance(ProjectManager.class)
-									.getPermittedProjects(new AccessProject()));
-							
-							Predicate<Project> issueManagementEnabledPredicate = item -> item.isIssueManagementEnabled();
-							CollectionUtils.filter(projects, issueManagementEnabledPredicate);							
-							
-							Collections.sort(projects, new Comparator<Project>() {
-	
-								@Override
-								public int compare(Project o1, Project o2) {
-									return o1.getName().compareTo(o2.getName());
-								}
-								
-							});
-							return projects;
-						}
-						
-					}) {
-	
-						@Override
-						protected void onSelect(AjaxRequestTarget target, Project project) {
-							setResponsePage(NewIssuePage.class, NewIssuePage.paramsOf(project));
-						}
-	
-					}.add(AttributeAppender.append("class", "no-current"));
-				}
-			
-			});	
+			addNewIssueLink();	
 		} else {
 			add(new BookmarkablePageLink<Void>("newIssue", NewIssuePage.class, NewIssuePage.paramsOf(getProject())));
 		}
 		
-		add(new ModalLink("listFields") {
-
-			private List<String> listFields;
-			
-			@Override
-			protected Component newContent(String id, ModalPanel modal) {
-				Fragment fragment = new Fragment(id, "listFieldsFrag", IssueListPanel.this);
-				Form<?> form = new Form<Void>("form");
-				listFields = getListFields();
-				form.add(new StringMultiChoice("fields", new IModel<Collection<String>>() {
-
-					@Override
-					public void detach() {
-					}
-
-					@Override
-					public Collection<String> getObject() {
-						return listFields;
-					}
-
-					@Override
-					public void setObject(Collection<String> object) {
-						listFields = new ArrayList<>(object);
-					}
-					
-				}, new LoadableDetachableModel<Map<String, String>>() {
-
-					@Override
-					protected Map<String, String> load() {
-						Map<String, String> choices = new LinkedHashMap<>();
-						choices.put(Issue.NAME_STATE, Issue.NAME_STATE);
-						for (String fieldName: getGlobalIssueSetting().getFieldNames())
-							choices.put(fieldName, fieldName);
-						return choices;
-					}
-					
-				}));
-				
-				form.add(new AjaxLink<Void>("close") {
-
-					@Override
-					public void onClick(AjaxRequestTarget target) {
-						modal.close();
-					}
-					
-				});
-				
-				form.add(new AjaxButton("save") {
-
-					@Override
-					protected void onSubmit(AjaxRequestTarget target, Form<?> form) {
-						super.onSubmit(target, form);
-						modal.close();
-						if (getProject() != null) {
-							getProject().getIssueSetting().setListFields(listFields);
-							OneDev.getInstance(ProjectManager.class).save(getProject());
-						} else {
-							getGlobalIssueSetting().setListFields(listFields);
-							OneDev.getInstance(SettingManager.class).saveIssueSetting(getGlobalIssueSetting());
-						}
-						target.add(body);
-					}
-					
-				});
-				
-				form.add(new AjaxLink<Void>("useDefault") {
-
-					@Override
-					public void onClick(AjaxRequestTarget target) {
-						modal.close();
-						getProject().getIssueSetting().setListFields(null);
-						OneDev.getInstance(ProjectManager.class).save(getProject());
-						target.add(body);
-					}
-					
-				}.setVisible(getProject() != null && getProject().getIssueSetting().getListFields(false) != null));
-				
-				form.add(new AjaxLink<Void>("cancel") {
-
-					@Override
-					public void onClick(AjaxRequestTarget target) {
-						modal.close();
-					}
-					
-				});
-
-				fragment.add(form);
-				
-				return fragment;
-			}
-
-			@Override
-			protected void onConfigure() {
-				super.onConfigure();
-				setVisible(SecurityUtils.isAdministrator() || getProject() != null && SecurityUtils.canManageIssues(getProject()));
-			}
-			
-		});
+		addFieldsList();
 		
-		ModalLink batchEditSelectedLink;
-		add(batchEditSelectedLink = new ModalLink("batchEditSelected") {
-
-			@Override
-			protected String getModalCssClass() {
-				return "modal-lg";
-			}
-
-			@Override
-			protected Component newContent(String id, ModalPanel modal) {
-				return new BatchEditPanel(id) {
-
-					@Override
-					protected Project getProject() {
-						return IssueListPanel.this.getProject();
-					}
-
-					@Override
-					protected void onCancel(AjaxRequestTarget target) {
-						modal.close();
-					}
-
-					@Override
-					protected void onUpdated(AjaxRequestTarget target) {
-						modal.close();
-						target.add(body);
-					}
-
-					@Override
-					protected Iterator<Issue> getIssueIterator() {
-						List<Issue> issues = new ArrayList<>();
-						for (IModel<Issue> each: selectionColumn.getSelections())
-							issues.add(each.getObject());
-						return issues.iterator();
-					}
-
-					@Override
-					protected int getIssueCount() {
-						return selectionColumn.getSelections().size();
-					}
-
-					@Override
-					protected IssueQuery getIssueQuery() {
-						return queryModel.getObject();
-					}
-
-				};
-			}
-			
-			@Override
-			protected void onConfigure() {
-				super.onConfigure();
-				setVisible(getProject() != null 
-						&& selectionColumn != null 
-						&& !selectionColumn.getSelections().isEmpty()
-						&& SecurityUtils.canManageIssues(getProject()));
-			}
-			
-		});
+		ModalLink batchEditSelectedLink = addBatchEditSelectedLink();
 		batchEditSelectedLink.setOutputMarkupPlaceholderTag(true);
 
-		add(new ModalLink("batchEditAll") {
-
-			@Override
-			protected String getModalCssClass() {
-				return "modal-lg";
-			}
-			
-			@Override
-			protected Component newContent(String id, ModalPanel modal) {
-				return new BatchEditPanel(id) {
-
-					@Override
-					protected Project getProject() {
-						return IssueListPanel.this.getProject();
-					}
-
-					@Override
-					protected void onCancel(AjaxRequestTarget target) {
-						modal.close();
-					}
-
-					@Override
-					protected void onUpdated(AjaxRequestTarget target) {
-						modal.close();
-						target.add(body);
-					}
-
-					@Override
-					protected Iterator<? extends Issue> getIssueIterator() {
-						return dataProvider.iterator(0, issuesTable.getItemCount());
-					}
-
-					@Override
-					protected int getIssueCount() {
-						return (int) issuesTable.getItemCount();
-					}
-
-					@Override
-					protected IssueQuery getIssueQuery() {
-						return queryModel.getObject();
-					}
-
-				};
-			}
-			
-			@Override
-			protected void onConfigure() {
-				super.onConfigure();
-				setVisible(getProject() != null 
-						&& issuesTable.getItemCount() != 0 
-						&& SecurityUtils.canManageIssues(getProject()));
-			}
-			
-		});
+		addBatchEditAllLink();
 		
-		dataProvider = new LoadableDetachableDataProvider<Issue, Void>() {
-
-			@Override
-			public Iterator<? extends Issue> iterator(long first, long count) {
-				try {
-					return getIssueManager().query(getProject(), queryModel.getObject(), 
-							(int)first, (int)count, true).iterator();
-				} catch (ExplicitException e) {
-					error(e.getMessage());
-					return new ArrayList<Issue>().iterator();
-				}
-			}
-
-			@Override
-			public long calcSize() {
-				IssueQuery query = queryModel.getObject();
-				if (query != null) {
-					try {
-						return getIssueManager().count(getProject(), query.getCriteria());
-					} catch (ExplicitException e) {
-						error(e.getMessage());
-					}
-				}
-				return 0;
-			}
-
-			@Override
-			public IModel<Issue> model(Issue object) {
-				Long issueId = object.getId();
-				return new LoadableDetachableModel<Issue>() {
-
-					@Override
-					protected Issue load() {
-						return getIssueManager().load(issueId);
-					}
-					
-				};
-			}
-			
-		};
+		dataProvider = createLoadableDetachableDataProvider();
 		
 		body = new WebMarkupContainer("body");
 		add(body.setOutputMarkupId(true));
 		
 		body.add(new FencedFeedbackPanel("feedback", this));
 		
+		addBodyColumns(batchEditSelectedLink);
+		
+		setupIssuesTable();
+		
+		setOutputMarkupId(true);
+	}
+
+	private void setupIssuesTable() {
+		if (getPagingHistorySupport() != null)
+			issuesTable.setCurrentPage(getPagingHistorySupport().getCurrentPage());
+		issuesTable.addBottomToolbar(new NavigationToolbar(issuesTable) {
+
+			@Override
+			protected PagingNavigator newPagingNavigator(String navigatorId, DataTable<?, ?> table) {
+				return new HistoryAwarePagingNavigator(navigatorId, table, getPagingHistorySupport());
+			}
+			
+		});
+		issuesTable.addBottomToolbar(new NoRecordsToolbar(issuesTable));
+		issuesTable.add(new NoRecordsBehavior());
+	}
+
+	private void addBodyColumns(ModalLink batchEditSelectedLink) {
 		List<IColumn<Issue, Void>> columns = new ArrayList<>();
 		
 		columns.add(new AbstractColumn<Issue, Void>(Model.of("")) {
@@ -669,6 +276,23 @@ public abstract class IssueListPanel extends Panel {
 			});
 		}
 		
+		addModelColumn(columns);
+		
+		body.add(issuesTable = new DataTable<Issue, Void>("issues", columns, dataProvider, WebConstants.PAGE_SIZE) {
+
+			@Override
+			protected Item<Issue> newRowItem(String id, int index, IModel<Issue> model) {
+				Item<Issue> item = super.newRowItem(id, index, model);
+				Issue issue = model.getObject();
+				item.add(AttributeAppender.append("class", 
+						issue.isVisitedAfter(issue.getLastUpdate().getDate())?"issue":"issue new"));
+				return item;
+			}
+			
+		});
+	}
+
+	private void addModelColumn(List<IColumn<Issue, Void>> columns) {
 		columns.add(new AbstractColumn<Issue, Void>(Model.of("")) {
 
 			@Override
@@ -775,34 +399,463 @@ public abstract class IssueListPanel extends Panel {
 			}
 			
 		});
-		
-		body.add(issuesTable = new DataTable<Issue, Void>("issues", columns, dataProvider, WebConstants.PAGE_SIZE) {
+	}
+
+	private LoadableDetachableDataProvider<Issue, Void> createLoadableDetachableDataProvider() {
+		return new LoadableDetachableDataProvider<Issue, Void>() {
 
 			@Override
-			protected Item<Issue> newRowItem(String id, int index, IModel<Issue> model) {
-				Item<Issue> item = super.newRowItem(id, index, model);
-				Issue issue = model.getObject();
-				item.add(AttributeAppender.append("class", 
-						issue.isVisitedAfter(issue.getLastUpdate().getDate())?"issue":"issue new"));
-				return item;
+			public Iterator<? extends Issue> iterator(long first, long count) {
+				try {
+					return getIssueManager().query(getProject(), queryModel.getObject(), 
+							(int)first, (int)count, true).iterator();
+				} catch (ExplicitException e) {
+					error(e.getMessage());
+					return new ArrayList<Issue>().iterator();
+				}
+			}
+
+			@Override
+			public long calcSize() {
+				IssueQuery query = queryModel.getObject();
+				if (query != null) {
+					try {
+						return getIssueManager().count(getProject(), query.getCriteria());
+					} catch (ExplicitException e) {
+						error(e.getMessage());
+					}
+				}
+				return 0;
+			}
+
+			@Override
+			public IModel<Issue> model(Issue object) {
+				Long issueId = object.getId();
+				return new LoadableDetachableModel<Issue>() {
+
+					@Override
+					protected Issue load() {
+						return getIssueManager().load(issueId);
+					}
+					
+				};
+			}
+			
+		};
+	}
+
+	private void addBatchEditAllLink() {
+		add(new ModalLink("batchEditAll") {
+
+			@Override
+			protected String getModalCssClass() {
+				return "modal-lg";
+			}
+			
+			@Override
+			protected Component newContent(String id, ModalPanel modal) {
+				return new BatchEditPanel(id) {
+
+					@Override
+					protected Project getProject() {
+						return IssueListPanel.this.getProject();
+					}
+
+					@Override
+					protected void onCancel(AjaxRequestTarget target) {
+						modal.close();
+					}
+
+					@Override
+					protected void onUpdated(AjaxRequestTarget target) {
+						modal.close();
+						target.add(body);
+					}
+
+					@Override
+					protected Iterator<? extends Issue> getIssueIterator() {
+						return dataProvider.iterator(0, issuesTable.getItemCount());
+					}
+
+					@Override
+					protected int getIssueCount() {
+						return (int) issuesTable.getItemCount();
+					}
+
+					@Override
+					protected IssueQuery getIssueQuery() {
+						return queryModel.getObject();
+					}
+
+				};
+			}
+			
+			@Override
+			protected void onConfigure() {
+				super.onConfigure();
+				setVisible(getProject() != null 
+						&& issuesTable.getItemCount() != 0 
+						&& SecurityUtils.canManageIssues(getProject()));
+			}
+			
+		});
+	}
+
+	private ModalLink addBatchEditSelectedLink() {
+		ModalLink batchEditSelectedLink;
+		add(batchEditSelectedLink = new ModalLink("batchEditSelected") {
+
+			@Override
+			protected String getModalCssClass() {
+				return "modal-lg";
+			}
+
+			@Override
+			protected Component newContent(String id, ModalPanel modal) {
+				return new BatchEditPanel(id) {
+
+					@Override
+					protected Project getProject() {
+						return IssueListPanel.this.getProject();
+					}
+
+					@Override
+					protected void onCancel(AjaxRequestTarget target) {
+						modal.close();
+					}
+
+					@Override
+					protected void onUpdated(AjaxRequestTarget target) {
+						modal.close();
+						target.add(body);
+					}
+
+					@Override
+					protected Iterator<Issue> getIssueIterator() {
+						List<Issue> issues = new ArrayList<>();
+						for (IModel<Issue> each: selectionColumn.getSelections())
+							issues.add(each.getObject());
+						return issues.iterator();
+					}
+
+					@Override
+					protected int getIssueCount() {
+						return selectionColumn.getSelections().size();
+					}
+
+					@Override
+					protected IssueQuery getIssueQuery() {
+						return queryModel.getObject();
+					}
+
+				};
+			}
+			
+			@Override
+			protected void onConfigure() {
+				super.onConfigure();
+				setVisible(getProject() != null 
+						&& selectionColumn != null 
+						&& !selectionColumn.getSelections().isEmpty()
+						&& SecurityUtils.canManageIssues(getProject()));
+			}
+			
+		});
+		return batchEditSelectedLink;
+	}
+
+	private void addFieldsList() {
+		add(new ModalLink("listFields") {
+
+			private List<String> listFields;
+			
+			@Override
+			protected Component newContent(String id, ModalPanel modal) {
+				Fragment fragment = new Fragment(id, "listFieldsFrag", IssueListPanel.this);
+				Form<?> form = new Form<Void>("form");
+				listFields = getListFields();
+				form.add(new StringMultiChoice("fields", new IModel<Collection<String>>() {
+
+					@Override
+					public void detach() {
+					}
+
+					@Override
+					public Collection<String> getObject() {
+						return listFields;
+					}
+
+					@Override
+					public void setObject(Collection<String> object) {
+						listFields = new ArrayList<>(object);
+					}
+					
+				}, new LoadableDetachableModel<Map<String, String>>() {
+
+					@Override
+					protected Map<String, String> load() {
+						Map<String, String> choices = new LinkedHashMap<>();
+						choices.put(Issue.NAME_STATE, Issue.NAME_STATE);
+						for (String fieldName: getGlobalIssueSetting().getFieldNames())
+							choices.put(fieldName, fieldName);
+						return choices;
+					}
+					
+				}));
+				
+				form.add(new AjaxLink<Void>("close") {
+
+					@Override
+					public void onClick(AjaxRequestTarget target) {
+						modal.close();
+					}
+					
+				});
+				
+				form.add(new AjaxButton("save") {
+
+					@Override
+					protected void onSubmit(AjaxRequestTarget target, Form<?> form) {
+						super.onSubmit(target, form);
+						modal.close();
+						if (getProject() != null) {
+							getProject().getIssueSetting().setListFields(listFields);
+							OneDev.getInstance(ProjectManager.class).save(getProject());
+						} else {
+							getGlobalIssueSetting().setListFields(listFields);
+							OneDev.getInstance(SettingManager.class).saveIssueSetting(getGlobalIssueSetting());
+						}
+						target.add(body);
+					}
+					
+				});
+				
+				form.add(new AjaxLink<Void>("useDefault") {
+
+					@Override
+					public void onClick(AjaxRequestTarget target) {
+						modal.close();
+						getProject().getIssueSetting().setListFields(null);
+						OneDev.getInstance(ProjectManager.class).save(getProject());
+						target.add(body);
+					}
+					
+				}.setVisible(getProject() != null && getProject().getIssueSetting().getListFields(false) != null));
+				
+				form.add(new AjaxLink<Void>("cancel") {
+
+					@Override
+					public void onClick(AjaxRequestTarget target) {
+						modal.close();
+					}
+					
+				});
+
+				fragment.add(form);
+				
+				return fragment;
+			}
+
+			@Override
+			protected void onConfigure() {
+				super.onConfigure();
+				setVisible(SecurityUtils.isAdministrator() || getProject() != null && SecurityUtils.canManageIssues(getProject()));
+			}
+			
+		});
+	}
+
+	private void addNewIssueLink() {
+		add(new DropdownLink("newIssue") {
+
+			@Override
+			protected Component newContent(String id, FloatingPanel dropdown) {
+				return new ProjectSelector(id, new LoadableDetachableModel<Collection<Project>>() {
+
+					@Override
+					protected Collection<Project> load() {
+						List<Project> projects = new ArrayList<>(OneDev.getInstance(ProjectManager.class)
+								.getPermittedProjects(new AccessProject()));
+						
+						Predicate<Project> issueManagementEnabledPredicate = item -> item.isIssueManagementEnabled();
+						CollectionUtils.filter(projects, issueManagementEnabledPredicate);							
+						
+						Collections.sort(projects, new Comparator<Project>() {
+
+							@Override
+							public int compare(Project o1, Project o2) {
+								return o1.getName().compareTo(o2.getName());
+							}
+							
+						});
+						return projects;
+					}
+					
+				}) {
+
+					@Override
+					protected void onSelect(AjaxRequestTarget target, Project project) {
+						setResponsePage(NewIssuePage.class, NewIssuePage.paramsOf(project));
+					}
+
+				}.add(AttributeAppender.append("class", "no-current"));
+			}
+		
+		});
+	}
+
+	private void addQueryForm() {
+		queryInput = new TextField<String>("input", queryStringModel);
+		queryInput.add(createIssueQueryBehavior());
+		
+		queryInput.add(new AjaxFormComponentUpdatingBehavior("clear") {
+			
+			@Override
+			protected void onUpdate(AjaxRequestTarget target) {
+				doQuery(target);
 			}
 			
 		});
 		
-		if (getPagingHistorySupport() != null)
-			issuesTable.setCurrentPage(getPagingHistorySupport().getCurrentPage());
-		issuesTable.addBottomToolbar(new NavigationToolbar(issuesTable) {
+		Form<?> queryForm = new Form<Void>("query");
+		queryForm.add(queryInput);
+		queryForm.add(new AjaxButton("submit") {
 
 			@Override
-			protected PagingNavigator newPagingNavigator(String navigatorId, DataTable<?, ?> table) {
-				return new HistoryAwarePagingNavigator(navigatorId, table, getPagingHistorySupport());
+			protected void onSubmit(AjaxRequestTarget target, Form<?> form) {
+				super.onSubmit(target, form);
+				IssueListPanel.this.getFeedbackMessages().clear();
+				doQuery(target);
 			}
 			
 		});
-		issuesTable.addBottomToolbar(new NoRecordsToolbar(issuesTable));
-		issuesTable.add(new NoRecordsBehavior());
-		
-		setOutputMarkupId(true);
+		add(queryForm);
+	}
+
+	private IssueQueryBehavior createIssueQueryBehavior() {
+		return new IssueQueryBehavior(new AbstractReadOnlyModel<Project>() {
+
+			@Override
+			public Project getObject() {
+				return getProject();
+			}
+			
+		}, true, true, false, false, false) {
+			
+			@Override
+			protected void onInput(AjaxRequestTarget target, String inputContent) {
+				IssueListPanel.this.getFeedbackMessages().clear();
+				querySubmitted = StringUtils.trimToEmpty(queryStringModel.getObject())
+						.equals(StringUtils.trimToEmpty(inputContent));
+				target.add(saveQueryLink);
+			}
+			
+		};
+	}
+
+	private void addQueriesDropDown() {
+		add(new DropdownLink("orderBy") {
+
+			@Override
+			protected Component newContent(String id, FloatingPanel dropdown) {
+				List<String> orderFields = new ArrayList<>(Issue.ORDER_FIELDS.keySet());
+				if (getProject() != null)
+					orderFields.remove(Issue.NAME_PROJECT);
+				for (FieldSpec field: getGlobalIssueSetting().getFieldSpecs()) {
+					if (field instanceof NumberField || field instanceof ChoiceField || field instanceof DateField) 
+						orderFields.add(field.getName());
+				}
+				
+				return new OrderEditPanel(id, orderFields, new IModel<List<EntitySort>> () {
+
+					@Override
+					public void detach() {
+					}
+
+					@Override
+					public List<EntitySort> getObject() {
+						IssueQuery query = parse(queryStringModel.getObject(), new IssueQuery());
+						IssueListPanel.this.getFeedbackMessages().clear();
+						if (query != null) 
+							return query.getSorts();
+						else
+							return new ArrayList<>();
+					}
+
+					@Override
+					public void setObject(List<EntitySort> object) {
+						IssueQuery query = parse(queryStringModel.getObject(), new IssueQuery());
+						IssueListPanel.this.getFeedbackMessages().clear();
+						if (query == null)
+							query = new IssueQuery();
+						query.getSorts().clear();
+						query.getSorts().addAll(object);
+						queryStringModel.setObject(query.toString());
+						AjaxRequestTarget target = RequestCycle.get().find(AjaxRequestTarget.class); 
+						target.add(queryInput);
+						doQuery(target);
+					}
+					
+				});
+			}
+			
+		});
+	}
+
+	private void addSaveQueryLink() {
+		add(saveQueryLink = new AjaxLink<Void>("saveQuery") {
+
+			@Override
+			protected void onConfigure() {
+				super.onConfigure();
+				setEnabled(querySubmitted && queryModel.getObject() != null);
+				setVisible(SecurityUtils.getUser() != null && getQuerySaveSupport() != null);
+			}
+
+			@Override
+			protected void onComponentTag(ComponentTag tag) {
+				super.onComponentTag(tag);
+				configure();
+				if (!isEnabled()) 
+					tag.append("class", "disabled", " ");
+				if (!querySubmitted)
+					tag.put("title", "Query not submitted");
+				else if (queryModel.getObject() == null)
+					tag.put("title", "Can not save malformed query");
+			}
+
+			@Override
+			public void onClick(AjaxRequestTarget target) {
+				getQuerySaveSupport().onSaveQuery(target, queryModel.getObject().toString());
+			}		
+			
+		}.setOutputMarkupPlaceholderTag(true));
+	}
+
+	private void addSavedQueriesLink() {
+		add(new AjaxLink<Void>("showSavedQueries") {
+
+			@Override
+			public void onEvent(IEvent<?> event) {
+				super.onEvent(event);
+				if (event.getPayload() instanceof SavedQueriesClosed) {
+					((SavedQueriesClosed) event.getPayload()).getHandler().add(this);
+				}
+			}
+			
+			@Override
+			protected void onConfigure() {
+				super.onConfigure();
+				setVisible(getQuerySaveSupport() != null && !getQuerySaveSupport().isSavedQueriesVisible());
+			}
+
+			@Override
+			public void onClick(AjaxRequestTarget target) {
+				send(getPage(), Broadcast.BREADTH, new SavedQueriesOpened(target));
+				target.add(this);
+			}
+			
+		}.setOutputMarkupPlaceholderTag(true));
 	}
 	
 	private List<String> getListFields() {
