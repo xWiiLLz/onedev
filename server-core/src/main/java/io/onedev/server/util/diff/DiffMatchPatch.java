@@ -1867,7 +1867,7 @@ public class DiffMatchPatch {
 					if (aDiff.text.length() >= 2 * Patch_Margin) {
 						// Time for a new patch.
 						if (!patch.diffs.isEmpty()) {
-							patch.patch_addContext(prepatch_text, Match_MaxBits, Patch_Margin);
+							patch.addContext(prepatch_text, Match_MaxBits, Patch_Margin);
 							patches.add(patch);
 							patch = new Patch();
 							// Unlike Unidiff, our patch lists have a rolling
@@ -1893,7 +1893,7 @@ public class DiffMatchPatch {
 		}
 		// Pick up the leftover patch if not empty.
 		if (!patch.diffs.isEmpty()) {
-			patch.patch_addContext(prepatch_text, Match_MaxBits, Patch_Margin);
+			patch.addContext(prepatch_text, Match_MaxBits, Patch_Margin);
 			patches.add(patch);
 		}
 
@@ -2475,7 +2475,7 @@ public class DiffMatchPatch {
 		 * @param Match_MaxBits
 		 * @param Patch_Margin
 		 */
-		public void patch_addContext(String text, short Match_MaxBits, short Patch_Margin) {
+		public void addContext(String text, short Match_MaxBits, short Patch_Margin) {
 			if (text.length() == 0) {
 				return;
 			}
