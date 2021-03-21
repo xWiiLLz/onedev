@@ -133,6 +133,18 @@ import io.onedev.server.web.util.WicketUtils;
 @Editable
 public class Project extends AbstractEntity {
 
+	private transient RefCommitManager commitManager = new RefCommitManager();
+
+	private transient RepositoryManager repositoryManager = new RepositoryManager();
+
+	private ForkManager forkManager = new ForkManager();
+
+	private transient CommitStatusManager commitStatusManager = new CommitStatusManager();
+
+	private TagBranchProtection tagBranchProtection = new TagBranchProtection();
+
+	private MilestoneManager milestoneManager = new MilestoneManager();
+
 	private static final long serialVersionUID = 1L;
 	
 	public static final String NAME_NAME = "Name";
@@ -162,7 +174,7 @@ public class Project extends AbstractEntity {
 			NAME_NAME, PROP_NAME, 
 			NAME_UPDATE_DATE, PROP_UPDATE_DATE);
 	
-	private static final int LAST_COMMITS_CACHE_THRESHOLD = 1000;
+	public static final int LAST_COMMITS_CACHE_THRESHOLD = 1000;
 	
 	public static final int MAX_UPLOAD_SIZE = 10; // In mega bytes
 	
@@ -184,10 +196,6 @@ public class Project extends AbstractEntity {
 	}
 
 	@ManyToOne(fetch=FetchType.LAZY)
-	@JoinColumn(nullable=true)
-	private Project forkedFrom;
-	
-	@ManyToOne(fetch=FetchType.LAZY)
 	@JoinColumn
 	private User owner;
 	
@@ -200,16 +208,6 @@ public class Project extends AbstractEntity {
     @OneToMany(mappedBy="project")
     private Collection<Build> builds = new ArrayList<>();
     
-	@Lob
-	@Column(nullable=false, length=65535)
-	@JsonView(DefaultView.class)
-	private ArrayList<BranchProtection> branchProtections = new ArrayList<>();
-	
-	@Lob
-	@Column(nullable=false, length=65535)
-	@JsonView(DefaultView.class)
-	private ArrayList<TagProtection> tagProtections = new ArrayList<>();
-	
 	@Column(nullable=false)
 	private Date createDate = new Date();
 	
@@ -255,9 +253,6 @@ public class Project extends AbstractEntity {
 	@OneToMany(mappedBy="project", cascade=CascadeType.REMOVE)
 	private Collection<BuildQuerySetting> userBuildQuerySettings = new ArrayList<>();
 	
-	@OneToMany(mappedBy="project", cascade=CascadeType.REMOVE)
-	private Collection<Milestone> milestones = new ArrayList<>();
-	
 	private boolean issueManagementEnabled = true;
 	
 	@Lob
@@ -290,21 +285,9 @@ public class Project extends AbstractEntity {
 	@JsonView(DefaultView.class)
 	private ArrayList<WebHook> webHooks = new ArrayList<>();
 	
-	private transient Repository repository;
-	
-    private transient Map<BlobIdent, Optional<Blob>> blobCache;
-    
-    private transient Map<String, Optional<ObjectId>> objectIdCache;
+	private transient Map<BlobIdent, Optional<Blob>> blobCache;
     
     private transient Map<ObjectId, Optional<BuildSpec>> buildSpecCache;
-    
-    private transient Map<ObjectId, Map<String, Collection<StatusInfo>>> commitStatusCache;
-    
-    private transient Map<ObjectId, Optional<RevCommit>> commitCache;
-    
-    private transient Map<String, Optional<Ref>> refCache;
-    
-    private transient Optional<String> defaultBranchOptional;
     
     private transient Optional<IssueQuerySetting> issueQuerySettingOfCurrentUserHolder;
     
@@ -316,11 +299,7 @@ public class Project extends AbstractEntity {
     
     private transient Optional<CommitQuerySetting> commitQuerySettingOfCurrentUserHolder;
     
-    private transient Optional<RevCommit> lastCommitHolder;
-    
-	private transient List<Milestone> sortedMilestones;
-	
-	@Editable(order=100)
+    @Editable(order=100)
 	@ProjectName
 	@NotEmpty
 	public String getName() {
@@ -342,19 +321,19 @@ public class Project extends AbstractEntity {
 	}
 
 	public ArrayList<BranchProtection> getBranchProtections() {
-		return branchProtections;
+		return tagBranchProtection.getBranchProtections();
 	}
 
 	public void setBranchProtections(ArrayList<BranchProtection> branchProtections) {
-		this.branchProtections = branchProtections;
+		tagBranchProtection.setBranchProtections(branchProtections);
 	}
 
 	public ArrayList<TagProtection> getTagProtections() {
-		return tagProtections;
+		return tagBranchProtection.getTagProtections();
 	}
 
 	public void setTagProtections(ArrayList<TagProtection> tagProtections) {
-		this.tagProtections = tagProtections;
+		tagBranchProtection.setTagProtections(tagProtections);
 	}
 
 	public Date getCreateDate() {
@@ -407,11 +386,11 @@ public class Project extends AbstractEntity {
 
 	@Nullable
 	public Project getForkedFrom() {
-		return forkedFrom;
+		return forkManager.getForkedFrom();
 	}
 
 	public void setForkedFrom(Project forkedFrom) {
-		this.forkedFrom = forkedFrom;
+		forkManager.setForkedFrom(forkedFrom);
 	}
 
 	public Collection<Project> getForks() {
@@ -423,10 +402,10 @@ public class Project extends AbstractEntity {
 	}
 	
 	public List<RefInfo> getBranchRefInfos() {
-		List<RefInfo> refInfos = getRefInfos(Constants.R_HEADS);
+		List<RefInfo> refInfos = commitManager.getRefInfos(Constants.R_HEADS, this.repositoryManager, this);
 		for (Iterator<RefInfo> it = refInfos.iterator(); it.hasNext();) {
 			RefInfo refInfo = it.next();
-			if (refInfo.getRef().getName().equals(GitUtils.branch2ref(getDefaultBranch()))) {
+			if (refInfo.getRef().getName().equals(GitUtils.branch2ref(commitManager.getDefaultBranch(this.repositoryManager, this)))) {
 				it.remove();
 				refInfos.add(0, refInfo);
 				break;
@@ -437,26 +416,15 @@ public class Project extends AbstractEntity {
     }
 	
 	public List<RefInfo> getTagRefInfos() {
-		return getRefInfos(Constants.R_TAGS);
+		return commitManager.getRefInfos(Constants.R_TAGS, this.repositoryManager, this);
     }
 	
 	public List<RefInfo> getRefInfos(String prefix) {
-		try (RevWalk revWalk = new RevWalk(getRepository())) {
-			List<Ref> refs = new ArrayList<Ref>(getRepository().getRefDatabase().getRefsByPrefix(prefix));
-			List<RefInfo> refInfos = refs.stream()
-					.map(ref->new RefInfo(revWalk, ref))
-					.filter(refInfo->refInfo.getPeeledObj() instanceof RevCommit)
-					.collect(Collectors.toList());
-			Collections.sort(refInfos);
-			Collections.reverse(refInfos);
-			return refInfos;
-		} catch (IOException e) {
-			throw new RuntimeException(e);
-		}
+		return commitManager.getRefInfos(prefix, this.repositoryManager, this);
     }
 
 	public Git git() {
-		return Git.wrap(getRepository()); 
+		return repositoryManager.git(this); 
 	}
 	
 	public File getGitDir() {
@@ -470,10 +438,7 @@ public class Project extends AbstractEntity {
 	 * 			fork root of this project
 	 */
 	public Project getForkRoot() {
-		if (forkedFrom != null) 
-			return forkedFrom.getForkRoot();
-		else 
-			return this;
+		return forkManager.getForkRoot(this);
 	}
 	
 	/**
@@ -493,18 +458,11 @@ public class Project extends AbstractEntity {
 	}
 	
 	public List<Project> getForkParents() {
-		List<Project> forkParents = new ArrayList<>();
-		if (getForkedFrom() != null) {
-			forkParents.add(getForkedFrom());
-			forkParents.addAll(getForkedFrom().getForkParents());
-		}
-		return forkParents;
+		return forkManager.getForkParents();
 	}
 	
 	public Repository getRepository() {
-		if (repository == null) 
-			repository = OneDev.getInstance(ProjectManager.class).getRepository(this);
-		return repository;
+		return repositoryManager.getRepository(this);
 	}
 	
 	public String getUrl() {
@@ -513,28 +471,11 @@ public class Project extends AbstractEntity {
 	
 	@Nullable
 	public String getDefaultBranch() {
-		if (defaultBranchOptional == null) {
-			try {
-				Ref headRef = getRepository().findRef("HEAD");
-				if (headRef != null 
-						&& headRef.isSymbolic() 
-						&& headRef.getTarget().getName().startsWith(Constants.R_HEADS) 
-						&& headRef.getObjectId() != null) {
-					defaultBranchOptional = Optional.of(Repository.shortenRefName(headRef.getTarget().getName()));
-				} else {
-					defaultBranchOptional = Optional.absent();
-				}
-			} catch (IOException e) {
-				throw new RuntimeException(e);
-			}
-		}
-		return defaultBranchOptional.orNull();
+		return commitManager.getDefaultBranch(this.repositoryManager, this);
 	}
 	
 	public void setDefaultBranch(String defaultBranchName) {
-		RefUpdate refUpdate = GitUtils.getRefUpdate(getRepository(), "HEAD");
-		GitUtils.linkRef(refUpdate, GitUtils.branch2ref(defaultBranchName));
-		defaultBranchOptional = null;
+		commitManager.setDefaultBranch(defaultBranchName, this.repositoryManager, this);
 	}
 	
 	private Map<BlobIdent, Optional<Blob>> getBlobCache() {
@@ -570,13 +511,13 @@ public class Project extends AbstractEntity {
 		
 		Optional<Blob> blob = getBlobCache().get(blobIdent);
 		if (blob == null) {
-			try (RevWalk revWalk = new RevWalk(getRepository())) {
-				ObjectId revId = getObjectId(blobIdent.revision, mustExist);		
+			try (RevWalk revWalk = new RevWalk(repositoryManager.getRepository(this))) {
+				ObjectId revId = commitManager.getObjectId(blobIdent.revision, mustExist, this.repositoryManager, this);		
 				if (revId != null) {
 					RevCommit commit = GitUtils.parseCommit(revWalk, revId);
 					if (commit != null) {
 						RevTree revTree = commit.getTree();
-						TreeWalk treeWalk = TreeWalk.forPath(getRepository(), blobIdent.path, revTree);
+						TreeWalk treeWalk = TreeWalk.forPath(repositoryManager.getRepository(this), blobIdent.path, revTree);
 						if (treeWalk != null) {
 							ObjectId blobId = treeWalk.getObjectId(0);
 							if (blobIdent.isGitLink()) {
@@ -613,10 +554,10 @@ public class Project extends AbstractEntity {
 	}
 	
 	public InputStream getInputStream(BlobIdent ident) {
-		try (RevWalk revWalk = new RevWalk(getRepository())) {
-			ObjectId commitId = getObjectId(ident.revision, true);
+		try (RevWalk revWalk = new RevWalk(repositoryManager.getRepository(this))) {
+			ObjectId commitId = commitManager.getObjectId(ident.revision, true, this.repositoryManager, this);
 			RevTree revTree = revWalk.parseCommit(commitId).getTree();
-			TreeWalk treeWalk = TreeWalk.forPath(getRepository(), ident.path, revTree);
+			TreeWalk treeWalk = TreeWalk.forPath(repositoryManager.getRepository(this), ident.path, revTree);
 			if (treeWalk != null) {
 				ObjectLoader objectLoader = treeWalk.getObjectReader().open(treeWalk.getObjectId(0));
 				return objectLoader.openStream();
@@ -642,56 +583,20 @@ public class Project extends AbstractEntity {
 	 */
 	@Nullable
 	public ObjectId getObjectId(String revision, boolean mustExist) {
-		if (objectIdCache == null)
-			objectIdCache = new HashMap<>();
-		
-		Optional<ObjectId> optional = objectIdCache.get(revision);
-		if (optional == null) {
-			optional = Optional.fromNullable(GitUtils.resolve(getRepository(), revision));
-			objectIdCache.put(revision, optional);
-		}
-		if (mustExist && !optional.isPresent())
-			throw new ObjectNotFoundException("Unable to find object '" + revision + "'");
-		return optional.orNull();
+		return commitManager.getObjectId(revision, mustExist, this.repositoryManager, this);
 	}
 	
 	public void cacheObjectId(String revision, @Nullable ObjectId objectId) {
-		if (objectIdCache == null)
-			objectIdCache = new HashMap<>();
-		
-		objectIdCache.put(revision, Optional.fromNullable(objectId));
+		commitManager.cacheObjectId(revision, objectId);
 	}
 
 	public Map<String, Status> getCommitStatus(ObjectId commitId, 
 			@Nullable PullRequest request, @Nullable String refName) {
-		Map<String, Collection<StatusInfo>> commitStatusInfos = getCommitStatusCache().get(commitId);
-		if (commitStatusInfos == null) {
-			BuildManager buildManager = OneDev.getInstance(BuildManager.class);
-			commitStatusInfos = buildManager.queryStatus(this, Sets.newHashSet(commitId)).get(commitId);
-			getCommitStatusCache().put(commitId, Preconditions.checkNotNull(commitStatusInfos));
-		}
-		Map<String, Status> commitStatus = new HashMap<>();
-		for (Map.Entry<String, Collection<StatusInfo>> entry: commitStatusInfos.entrySet()) {
-			Collection<Status> statuses = new ArrayList<>();
-			for (StatusInfo statusInfo: entry.getValue()) {
-				if ((refName == null || refName.equals(statusInfo.getRefName())) 
-						&& Objects.equals(PullRequest.idOf(request), statusInfo.getRequestId())) {
-					statuses.add(statusInfo.getStatus());
-				}
-			}
-			commitStatus.put(entry.getKey(), Status.getOverallStatus(statuses));
-		}
-		return commitStatus;
-	}
-	
-	private Map<ObjectId, Map<String, Collection<StatusInfo>>> getCommitStatusCache() {
-		if (commitStatusCache == null)
-			commitStatusCache = new HashMap<>();
-		return commitStatusCache;
+		return commitStatusManager.getCommitStatus(commitId, request, refName, this);
 	}
 	
 	public void cacheCommitStatus(Map<ObjectId, Map<String, Collection<StatusInfo>>> commitStatuses) {
-		getCommitStatusCache().putAll(commitStatuses);
+		commitStatusManager.cacheCommitStatus(commitStatuses);
 	}
 	
 	/**
@@ -727,8 +632,8 @@ public class Project extends AbstractEntity {
 	
 	public List<String> getJobNames() {
 		List<String> jobNames = new ArrayList<>();
-		if (getDefaultBranch() != null) {
-			BuildSpec buildSpec = getBuildSpec(getObjectId(getDefaultBranch(), true));
+		if (commitManager.getDefaultBranch(this.repositoryManager, this) != null) {
+			BuildSpec buildSpec = getBuildSpec(commitManager.getObjectId(commitManager.getDefaultBranch(this.repositoryManager, this), true, this.repositoryManager, this));
 			if (buildSpec != null)
 				jobNames.addAll(buildSpec.getJobMap().keySet());
 		}
@@ -736,129 +641,27 @@ public class Project extends AbstractEntity {
 	}
 	
 	public RevCommit getLastCommit() {
-		if (lastCommitHolder == null) {
-			RevCommit lastCommit = null;
-			try {
-				for (Ref ref: getRepository().getRefDatabase().getRefsByPrefix(Constants.R_HEADS)) {
-					RevCommit commit = getRevCommit(ref.getObjectId(), false);
-					if (commit != null) {
-						if (lastCommit != null) {
-							if (commit.getCommitTime() > lastCommit.getCommitTime())
-								lastCommit = commit;
-						} else {
-							lastCommit = commit;
-						}
-					}
-				}
-			} catch (IOException e) {
-				throw new RuntimeException(e);
-			}
-			lastCommitHolder = Optional.fromNullable(lastCommit);
-		}
-		return lastCommitHolder.orNull();
+		return commitManager.getLastCommit(this.repositoryManager, this);
 	}
 	
 	public LastCommitsOfChildren getLastCommitsOfChildren(String revision, @Nullable String path) {
-		if (path == null)
-			path = "";
-		
-		final File cacheDir = new File(
-				OneDev.getInstance(StorageManager.class).getProjectInfoDir(getId()), 
-				"last_commits/" + path + "/onedev_last_commits");
-		
-		final ReadWriteLock lock;
-		try {
-			lock = LockUtils.getReadWriteLock(cacheDir.getCanonicalPath());
-		} catch (IOException e) {
-			throw new RuntimeException(e);
-		}
-		
-		final Set<ObjectId> commitIds = new HashSet<>(); 
-		
-		lock.readLock().lock();
-		try {
-			if (cacheDir.exists()) {
-				for (String each: cacheDir.list()) 
-					commitIds.add(ObjectId.fromString(each));
-			} 	
-		} finally {
-			lock.readLock().unlock();
-		}
-		
-		org.eclipse.jgit.revwalk.LastCommitsOfChildren.Cache cache;
-		if (!commitIds.isEmpty()) {
-			cache = new org.eclipse.jgit.revwalk.LastCommitsOfChildren.Cache() {
-	
-				@SuppressWarnings("unchecked")
-				@Override
-				public Map<String, Value> getLastCommitsOfChildren(ObjectId commitId) {
-					if (commitIds.contains(commitId)) {
-						lock.readLock().lock();
-						try {
-							byte[] bytes = FileUtils.readFileToByteArray(new File(cacheDir, commitId.name()));
-							return (Map<String, Value>) SerializationUtils.deserialize(bytes);
-						} catch (IOException e) {
-							throw new RuntimeException(e);
-						} finally {
-							lock.readLock().unlock();
-						}
-					} else {
-						return null;
-					}
-				}
-				
-			};
-		} else {
-			cache = null;
-		}
-
-		final AnyObjectId commitId = getObjectId(revision, true);
-		
-		long time = System.currentTimeMillis();
-		LastCommitsOfChildren lastCommits = new LastCommitsOfChildren(getRepository(), commitId, path, cache);
-		long elapsed = System.currentTimeMillis()-time;
-		if (elapsed > LAST_COMMITS_CACHE_THRESHOLD) {
-			lock.writeLock().lock();
-			try {
-				if (!cacheDir.exists())
-					FileUtils.createDir(cacheDir);
-				FileUtils.writeByteArrayToFile(
-						new File(cacheDir, commitId.name()), 
-						SerializationUtils.serialize(lastCommits));
-			} catch (IOException e) {
-				throw new RuntimeException(e);
-			} finally {
-				lock.writeLock().unlock();
-			}
-		}
-		return lastCommits;
+		return commitManager.getLastCommitsOfChildren(revision, path, this.repositoryManager, this);
 	}
 
 	@Nullable
 	public Ref getRef(String revision) {
-		if (refCache == null)
-			refCache = new HashMap<>();
-		Optional<Ref> optional = refCache.get(revision);
-		if (optional == null) {
-			try {
-				optional = Optional.fromNullable(getRepository().findRef(revision));
-			} catch (IOException e) {
-				throw new RuntimeException(e);
-			}
-			refCache.put(revision, optional);
-		}
-		return optional.orNull();
+		return commitManager.getRef(revision, this.repositoryManager, this);
 	}
 	
 	@Nullable
 	public String getRefName(String revision) {
-		Ref ref = getRef(revision);
+		Ref ref = commitManager.getRef(revision, this.repositoryManager, this);
 		return ref != null? ref.getName(): null;
 	}
 	
 	@Nullable
 	public Ref getBranchRef(String revision) {
-		Ref ref = getRef(revision);
+		Ref ref = commitManager.getRef(revision, this.repositoryManager, this);
 		if (ref != null && ref.getName().startsWith(Constants.R_HEADS))
 			return ref;
 		else
@@ -867,7 +670,7 @@ public class Project extends AbstractEntity {
 	
 	@Nullable
 	public Ref getTagRef(String revision) {
-		Ref ref = getRef(revision);
+		Ref ref = commitManager.getRef(revision, this.repositoryManager, this);
 		if (ref != null && ref.getName().startsWith(Constants.R_TAGS))
 			return ref;
 		else
@@ -876,9 +679,9 @@ public class Project extends AbstractEntity {
 	
 	@Nullable
 	public RevCommit getRevCommit(String revision, boolean mustExist) {
-		ObjectId revId = getObjectId(revision, mustExist);
+		ObjectId revId = commitManager.getObjectId(revision, mustExist, this.repositoryManager, this);
 		if (revId != null) {
-			return getRevCommit(revId, mustExist);
+			return commitManager.getRevCommit(revId, mustExist, this.repositoryManager, this);
 		} else {
 			return null;
 		}
@@ -886,30 +689,11 @@ public class Project extends AbstractEntity {
 	
 	@Nullable
 	public RevCommit getRevCommit(ObjectId revId, boolean mustExist) {
-		if (commitCache == null)
-			commitCache = new HashMap<>();
-		RevCommit commit;
-		Optional<RevCommit> optional = commitCache.get(revId);
-		if (optional == null) {
-			try (RevWalk revWalk = new RevWalk(getRepository())) {
-				optional = Optional.fromNullable(GitUtils.parseCommit(revWalk, revId));
-			}
-			commitCache.put(revId, optional);
-		}
-		commit = optional.orNull();
-		
-		if (mustExist && commit == null)
-			throw new ObjectNotFoundException("Unable to find commit associated with object id: " + revId);
-		else
-			return commit;
+		return commitManager.getRevCommit(revId, mustExist, this.repositoryManager, this);
 	}
 	
 	public List<Ref> getRefs(String prefix) {
-		try {
-			return getRepository().getRefDatabase().getRefsByPrefix(prefix);
-		} catch (IOException e) {
-			throw new RuntimeException(e);
-		} 
+		return repositoryManager.getRefs(prefix, this); 
 	}
 	
 	public Map<String, String> getSubmodules(String revision) {
@@ -941,13 +725,13 @@ public class Project extends AbstractEntity {
     
     public void createBranch(String branchName, String branchRevision) {
 		try {
-			CreateBranchCommand command = git().branchCreate();
+			CreateBranchCommand command = repositoryManager.git(this).branchCreate();
 			command.setName(branchName);
 			RevCommit commit = getRevCommit(branchRevision, true);
 			command.setStartPoint(getRevCommit(branchRevision, true));
 			command.call();
 			String refName = GitUtils.branch2ref(branchName); 
-			cacheObjectId(refName, commit);
+			commitManager.cacheObjectId(refName, commit);
 			
 	    	ObjectId commitId = commit.copy();
 	    	OneDev.getInstance(TransactionManager.class).runAfterCommit(new Runnable() {
@@ -974,7 +758,7 @@ public class Project extends AbstractEntity {
     
     public void createTag(String tagName, String tagRevision, PersonIdent taggerIdent, @Nullable String tagMessage) {
 		try {
-			TagCommand tag = git().tag();
+			TagCommand tag = repositoryManager.git(this).tag();
 			tag.setName(tagName);
 			if (tagMessage != null)
 				tag.setMessage(tagMessage);
@@ -983,7 +767,7 @@ public class Project extends AbstractEntity {
 			tag.call();
 			
 			String refName = GitUtils.tag2ref(tagName);
-			cacheObjectId(refName, tag.getObjectId());
+			commitManager.cacheObjectId(refName, tag.getObjectId());
 			
 	    	ObjectId commitId = tag.getObjectId().copy();
 	    	OneDev.getInstance(TransactionManager.class).runAfterCommit(new Runnable() {
@@ -1129,11 +913,11 @@ public class Project extends AbstractEntity {
 	}
 
 	public List<BlobIdent> getChildren(BlobIdent blobIdent, BlobIdentFilter blobIdentFilter) {
-		return getChildren(blobIdent, blobIdentFilter, getObjectId(blobIdent.revision, true));
+		return getChildren(blobIdent, blobIdentFilter, commitManager.getObjectId(blobIdent.revision, true, this.repositoryManager, this));
 	}
 	
 	public List<BlobIdent> getChildren(BlobIdent blobIdent, BlobIdentFilter blobIdentFilter, ObjectId commitId) {
-		Repository repository = getRepository();
+		Repository repository = repositoryManager.getRepository(this);
 		try (RevWalk revWalk = new RevWalk(repository)) {
 			RevTree revTree = revWalk.parseCommit(commitId).getTree();
 			
@@ -1163,7 +947,7 @@ public class Project extends AbstractEntity {
 		if (path != null) {
 			RevCommit commit = getRevCommit(revision, true);
 			try {
-				TreeWalk treeWalk = TreeWalk.forPath(getRepository(), path, commit.getTree());
+				TreeWalk treeWalk = TreeWalk.forPath(repositoryManager.getRepository(this), path, commit.getTree());
 				if (treeWalk != null) {
 					return treeWalk.getRawMode(0);
 				} else {
@@ -1179,29 +963,15 @@ public class Project extends AbstractEntity {
 	}
 
 	public Collection<Milestone> getMilestones() {
-		return milestones;
+		return milestoneManager.getMilestones();
 	}
 
 	public void setMilestones(Collection<Milestone> milestones) {
-		this.milestones = milestones;
+		milestoneManager.setMilestones(milestones);
 	}
 
 	public List<Milestone> getSortedMilestones() {
-		if (sortedMilestones == null) {
-			sortedMilestones = new ArrayList<>();
-			List<Milestone> open = getMilestones().stream()
-					.filter(it->!it.isClosed())
-					.sorted(new Milestone.DueDateComparator())
-					.collect(Collectors.toList());
-			sortedMilestones.addAll(open);
-			List<Milestone> closed = getMilestones().stream()
-					.filter(it->it.isClosed())
-					.sorted(new Milestone.DueDateComparator())
-					.collect(Collectors.toList());
-			Collections.reverse(closed);
-			sortedMilestones.addAll(closed);
-		}
-		return sortedMilestones;
+		return milestoneManager.getSortedMilestones();
 	}
 	
 	@Editable
@@ -1214,56 +984,11 @@ public class Project extends AbstractEntity {
 	}
 
 	public TagProtection getTagProtection(String tagName, User user) {
-		boolean noCreation = false;
-		boolean noDeletion = false;
-		boolean noUpdate = false;
-		for (TagProtection protection: getTagProtections()) {
-			if (protection.isEnabled() 
-					&& UserMatch.parse(protection.getUserMatch()).matches(this, user)
-					&& PatternSet.parse(protection.getTags()).matches(new PathMatcher(), tagName)) {
-				noCreation = noCreation || protection.isPreventCreation();
-				noDeletion = noDeletion || protection.isPreventDeletion();
-				noUpdate = noUpdate || protection.isPreventUpdate();
-			}
-		}
-		
-		TagProtection protection = new TagProtection();
-		protection.setPreventCreation(noCreation);
-		protection.setPreventDeletion(noDeletion);
-		protection.setPreventUpdate(noUpdate);
-		
-		return protection;
+		return tagBranchProtection.getTagProtection(tagName, user, this);
 	}
 	
 	public BranchProtection getBranchProtection(String branchName, @Nullable User user) {
-		boolean noCreation = false;
-		boolean noDeletion = false;
-		boolean noForcedPush = false;
-		Set<String> jobNames = new HashSet<>();
-		List<FileProtection> fileProtections = new ArrayList<>();
-		ReviewRequirement reviewRequirement = ReviewRequirement.parse(null, true);
-		for (BranchProtection protection: getBranchProtections()) {
-			if (protection.isEnabled() 
-					&& UserMatch.parse(protection.getUserMatch()).matches(this, user) 
-					&& PatternSet.parse(protection.getBranches()).matches(new PathMatcher(), branchName)) {
-				noCreation = noCreation || protection.isPreventCreation();
-				noDeletion = noDeletion || protection.isPreventDeletion();
-				noForcedPush = noForcedPush || protection.isPreventForcedPush();
-				jobNames.addAll(protection.getJobNames());
-				fileProtections.addAll(protection.getFileProtections());
-				reviewRequirement.mergeWith(protection.getParsedReviewRequirement());
-			}
-		}
-		
-		BranchProtection protection = new BranchProtection();
-		protection.setFileProtections(fileProtections);
-		protection.setJobNames(new ArrayList<>(jobNames));
-		protection.setPreventCreation(noCreation);
-		protection.setPreventDeletion(noDeletion);
-		protection.setPreventForcedPush(noForcedPush);
-		protection.setParsedReviewRequirement(reviewRequirement);
-		
-		return protection;
+		return tagBranchProtection.getBranchProtection(branchName, user, this);
 	}
 
 	@Override
@@ -1383,11 +1108,7 @@ public class Project extends AbstractEntity {
 	
 	@Nullable
 	public Milestone getMilestone(@Nullable String milestoneName) {
-		for (Milestone milestone: milestones) {
-			if (milestone.getName().equals(milestoneName))
-				return milestone;
-		}
-		return null;
+		return milestoneManager.getMilestone(milestoneName);
 	}
 
 	public boolean isCommitOnBranches(@Nullable ObjectId commitId, String branches) {
@@ -1416,26 +1137,26 @@ public class Project extends AbstractEntity {
 			cmd.fromRev(oldObjectId.name()).toRev(newObjectId.name());
 			return cmd.call();
 		} else {
-			return GitUtils.getChangedFiles(getRepository(), oldObjectId, newObjectId);
+			return GitUtils.getChangedFiles(repositoryManager.getRepository(this), oldObjectId, newObjectId);
 		}
 	}
 	
 	public boolean isReviewRequiredForModification(User user, String branch, @Nullable String file) {
-		return getBranchProtection(branch, user).isReviewRequiredForModification(user, this, branch, file);
+		return tagBranchProtection.isReviewRequiredForModification(user, branch, file, this);
 	}
 
 	public boolean isReviewRequiredForPush(User user, String branch, ObjectId oldObjectId, 
 			ObjectId newObjectId, Map<String, String> gitEnvs) {
-		return getBranchProtection(branch, user).isReviewRequiredForPush(user, this, branch, oldObjectId, newObjectId, gitEnvs);
+		return tagBranchProtection.isReviewRequiredForPush(user, branch, oldObjectId, newObjectId, gitEnvs, this);
 	}
 	
 	public boolean isBuildRequiredForModification(User user, String branch, @Nullable String file) {
-		return getBranchProtection(branch, user).isBuildRequiredForModification(this, branch, file);
+		return tagBranchProtection.isBuildRequiredForModification(user, branch, file, this);
 	}
 	
 	public boolean isBuildRequiredForPush(User user, String branch, ObjectId oldObjectId, ObjectId newObjectId, 
 			Map<String, String> gitEnvs) {
-		return getBranchProtection(branch, user).isBuildRequiredForPush(this, oldObjectId, newObjectId, gitEnvs);
+		return tagBranchProtection.isBuildRequiredForPush(user, branch, oldObjectId, newObjectId, gitEnvs, this);
 	}
 	
 	@Nullable
@@ -1466,6 +1187,21 @@ public class Project extends AbstractEntity {
 			}
 			return null;
 		}
+	}
+
+	private void readObject(java.io.ObjectInputStream stream)
+			throws java.io.IOException, java.lang.ClassNotFoundException {
+		stream.defaultReadObject();
+		this.commitManager = (RefCommitManager) stream.readObject();
+		this.repositoryManager = (RepositoryManager) stream.readObject();
+		this.commitStatusManager = (CommitStatusManager) stream.readObject();
+	}
+
+	private void writeObject(java.io.ObjectOutputStream stream) throws java.io.IOException {
+		stream.defaultWriteObject();
+		stream.writeObject(this.commitManager);
+		stream.writeObject(this.repositoryManager);
+		stream.writeObject(this.commitStatusManager);
 	}
 	
 }
