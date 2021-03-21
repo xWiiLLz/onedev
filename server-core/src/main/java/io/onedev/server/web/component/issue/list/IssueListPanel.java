@@ -696,7 +696,7 @@ public abstract class IssueListPanel extends QueriableDataTableListPanel {
 			
 			@Override
 			protected void onUpdate(AjaxRequestTarget target) {
-				doQuery(target);
+				doQuery(issuesTable, target);
 			}
 			
 		});
@@ -709,7 +709,7 @@ public abstract class IssueListPanel extends QueriableDataTableListPanel {
 			protected void onSubmit(AjaxRequestTarget target, Form<?> form) {
 				super.onSubmit(target, form);
 				IssueListPanel.this.getFeedbackMessages().clear();
-				doQuery(target);
+				doQuery(issuesTable, target);
 			}
 			
 		});
@@ -777,7 +777,7 @@ public abstract class IssueListPanel extends QueriableDataTableListPanel {
 						queryStringModel.setObject(query.toString());
 						AjaxRequestTarget target = RequestCycle.get().find(AjaxRequestTarget.class); 
 						target.add(queryInput);
-						doQuery(target);
+						doQuery(issuesTable, target);
 					}
 					
 				});
