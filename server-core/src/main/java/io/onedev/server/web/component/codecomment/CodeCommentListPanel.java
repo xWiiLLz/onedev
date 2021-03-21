@@ -60,7 +60,6 @@ import io.onedev.server.web.WebSession;
 import io.onedev.server.web.behavior.CodeCommentQueryBehavior;
 import io.onedev.server.web.component.datatable.HistoryAwareDataTable;
 import io.onedev.server.web.component.QueriableDataTableListPanel;
-import io.onedev.server.web.component.datatable.OneDataTable;
 import io.onedev.server.web.component.floating.FloatingPanel;
 import io.onedev.server.web.component.link.ActionablePageLink;
 import io.onedev.server.web.component.link.DropdownLink;
@@ -207,7 +206,7 @@ public abstract class CodeCommentListPanel extends QueriableDataTableListPanel {
 						queryStringModel.setObject(query.toString());
 						AjaxRequestTarget target = RequestCycle.get().find(AjaxRequestTarget.class); 
 						target.add(queryInput);
-						doQuery(target);
+						doQuery(commentsTable, target);
 					}
 					
 				});
@@ -238,7 +237,7 @@ public abstract class CodeCommentListPanel extends QueriableDataTableListPanel {
 			
 			@Override
 			protected void onUpdate(AjaxRequestTarget target) {
-				doQuery(target);
+				doQuery(commentsTable, target);
 			}
 			
 		});
@@ -251,7 +250,7 @@ public abstract class CodeCommentListPanel extends QueriableDataTableListPanel {
 			protected void onSubmit(AjaxRequestTarget target, Form<?> form) {
 				super.onSubmit(target, form);
 				CodeCommentListPanel.this.getFeedbackMessages().clear();
-				doQuery(target);
+				doQuery(commentsTable, target);
 			}
 			
 		});

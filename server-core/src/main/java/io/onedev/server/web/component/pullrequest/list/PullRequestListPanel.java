@@ -248,7 +248,7 @@ public abstract class PullRequestListPanel extends QueriableDataTableListPanel {
 						queryStringModel.setObject(query.toString());
 						AjaxRequestTarget target = RequestCycle.get().find(AjaxRequestTarget.class); 
 						target.add(queryInput);
-						doQuery(target);
+						doQuery(requestsTable, target);
 					}
 					
 				});
@@ -279,7 +279,7 @@ public abstract class PullRequestListPanel extends QueriableDataTableListPanel {
 			
 			@Override
 			protected void onUpdate(AjaxRequestTarget target) {
-				doQuery(target);
+				doQuery(requestsTable, target);
 			}
 			
 		});
@@ -292,7 +292,7 @@ public abstract class PullRequestListPanel extends QueriableDataTableListPanel {
 			protected void onSubmit(AjaxRequestTarget target, Form<?> form) {
 				super.onSubmit(target, form);
 				PullRequestListPanel.this.getFeedbackMessages().clear();
-				doQuery(target);
+				doQuery(requestsTable, target);
 			}
 			
 		});
