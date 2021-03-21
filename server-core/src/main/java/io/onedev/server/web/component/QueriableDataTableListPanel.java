@@ -12,17 +12,17 @@ import org.apache.wicket.model.IModel;
 import io.onedev.server.security.SecurityUtils;
 import io.onedev.server.web.util.QuerySaveSupport;
 
-public class QueriableListPanel extends Panel {
+public class QueriableDataTableListPanel extends Panel {
 
 	protected Component saveQueryLink;
 	protected WebMarkupContainer body;
 	protected boolean querySubmitted = true;
 
-	public QueriableListPanel(String id) {
+	public QueriableDataTableListPanel(String id) {
 		super(id);
 	}
 
-	public QueriableListPanel(String id, IModel<?> model) {
+	public QueriableDataTableListPanel(String id, IModel<?> model) {
 		super(id, model);
 	}
 

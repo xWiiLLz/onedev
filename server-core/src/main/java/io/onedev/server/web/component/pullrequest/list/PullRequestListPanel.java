@@ -69,6 +69,7 @@ import io.onedev.server.web.WebConstants;
 import io.onedev.server.web.WebSession;
 import io.onedev.server.web.behavior.NoRecordsBehavior;
 import io.onedev.server.web.behavior.PullRequestQueryBehavior;
+import io.onedev.server.web.component.QueriableDataTableListPanel;
 import io.onedev.server.web.component.branch.BranchLink;
 import io.onedev.server.web.component.floating.FloatingPanel;
 import io.onedev.server.web.component.link.ActionablePageLink;
@@ -92,7 +93,7 @@ import io.onedev.server.web.util.QuerySaveSupport;
 import io.onedev.server.web.util.ReferenceTransformer;
 
 @SuppressWarnings("serial")
-public abstract class PullRequestListPanel extends Panel {
+public abstract class PullRequestListPanel extends QueriableDataTableListPanel {
 
 	private final IModel<String> queryStringModel;
 	
@@ -108,12 +109,6 @@ public abstract class PullRequestListPanel extends Panel {
 	private DataTable<PullRequest, Void> requestsTable;
 	
 	private TextField<String> queryInput;
-	
-	private Component saveQueryLink;
-	
-	private WebMarkupContainer body;
-	
-	private boolean querySubmitted = true;
 	
 	public PullRequestListPanel(String id, IModel<String> queryModel) {
 		super(id);
@@ -131,11 +126,6 @@ public abstract class PullRequestListPanel extends Panel {
 
 	protected PullRequestQuery getBaseQuery() {
 		return new PullRequestQuery();
-	}
-	
-	@Nullable
-	protected QuerySaveSupport getQuerySaveSupport() {
-		return null;
 	}
 	
 	@Nullable
@@ -166,14 +156,6 @@ public abstract class PullRequestListPanel extends Panel {
 	
 	@Nullable
 	protected abstract Project getProject();
-
-	private void doQuery(AjaxRequestTarget target) {
-		requestsTable.setCurrentPage(0);
-		target.add(body);
-		querySubmitted = true;
-		if (SecurityUtils.getUser() != null && getQuerySaveSupport() != null)
-			target.add(saveQueryLink);
-	}
 	
 	@Override
 	protected void onInitialize() {

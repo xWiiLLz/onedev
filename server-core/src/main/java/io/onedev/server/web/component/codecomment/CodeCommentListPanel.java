@@ -59,6 +59,8 @@ import io.onedev.server.web.WebConstants;
 import io.onedev.server.web.WebSession;
 import io.onedev.server.web.behavior.CodeCommentQueryBehavior;
 import io.onedev.server.web.component.datatable.HistoryAwareDataTable;
+import io.onedev.server.web.component.QueriableDataTableListPanel;
+import io.onedev.server.web.component.datatable.OneDataTable;
 import io.onedev.server.web.component.floating.FloatingPanel;
 import io.onedev.server.web.component.link.ActionablePageLink;
 import io.onedev.server.web.component.link.DropdownLink;
@@ -77,7 +79,7 @@ import io.onedev.server.web.util.PagingHistorySupport;
 import io.onedev.server.web.util.QuerySaveSupport;
 
 @SuppressWarnings("serial")
-public abstract class CodeCommentListPanel extends Panel {
+public abstract class CodeCommentListPanel extends QueriableDataTableListPanel {
 
 	private final IModel<String> queryStringModel;
 	
@@ -106,12 +108,6 @@ public abstract class CodeCommentListPanel extends Panel {
 	
 	private TextField<String> queryInput;
 	
-	private Component saveQueryLink;
-	
-	private WebMarkupContainer body;
-	
-	private boolean querySubmitted = true;
-	
 	public CodeCommentListPanel(String id, IModel<String> queryModel) {
 		super(id);
 		this.queryStringModel = queryModel;
@@ -119,14 +115,6 @@ public abstract class CodeCommentListPanel extends Panel {
 
 	private CodeCommentManager getCodeCommentManager() {
 		return OneDev.getInstance(CodeCommentManager.class);
-	}
-	
-	private void doQuery(AjaxRequestTarget target) {
-		commentsTable.setCurrentPage(0);
-		target.add(body);
-		querySubmitted = true;
-		if (SecurityUtils.getUser() != null && getQuerySaveSupport() != null)
-			target.add(saveQueryLink);
 	}
 	
 	@Override
@@ -454,11 +442,6 @@ public abstract class CodeCommentListPanel extends Panel {
 	
 	@Nullable
 	protected PagingHistorySupport getPagingHistorySupport() {
-		return null;
-	}
-
-	@Nullable
-	protected QuerySaveSupport getQuerySaveSupport() {
 		return null;
 	}
 	
