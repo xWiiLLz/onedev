@@ -1756,54 +1756,6 @@ public class DiffMatchPatch {
 
 
 	/**
-	 * Increase the context until it is unique, but don't let the pattern expand
-	 * beyond Match_MaxBits.
-	 * 
-	 * @param patch The patch to grow.
-	 * @param text Source text.
-	 */
-	protected void patch_addContext(Patch patch, String text) {
-		if (text.length() == 0) {
-			return;
-		}
-		String pattern = text.substring(patch.start2, patch.start2 + patch.length1);
-		int padding = 0;
-
-		// Look for the first and last matches of pattern in text. If two
-		// different
-		// matches are found, increase the pattern length.
-		while (text.indexOf(pattern) != text.lastIndexOf(pattern)
-				&& pattern.length() < Match_MaxBits - Patch_Margin - Patch_Margin) {
-			padding += Patch_Margin;
-			pattern =
-					text.substring(Math.max(0, patch.start2 - padding),
-							Math.min(text.length(), patch.start2 + patch.length1 + padding));
-		}
-		// Add one chunk for good luck.
-		padding += Patch_Margin;
-
-		// Add the prefix.
-		String prefix = text.substring(Math.max(0, patch.start2 - padding), patch.start2);
-		if (prefix.length() != 0) {
-			patch.diffs.addFirst(new Diff(Operation.EQUAL, prefix));
-		}
-		// Add the suffix.
-		String suffix =
-				text.substring(patch.start2 + patch.length1,
-						Math.min(text.length(), patch.start2 + patch.length1 + padding));
-		if (suffix.length() != 0) {
-			patch.diffs.addLast(new Diff(Operation.EQUAL, suffix));
-		}
-
-		// Roll back the start points.
-		patch.start1 -= prefix.length();
-		patch.start2 -= prefix.length();
-		// Extend the lengths.
-		patch.length1 += prefix.length() + suffix.length();
-		patch.length2 += prefix.length() + suffix.length();
-	}
-
-	/**
 	 * Compute a list of patches to turn text1 into text2. A set of diffs will
 	 * be computed.
 	 * 
@@ -1915,7 +1867,7 @@ public class DiffMatchPatch {
 					if (aDiff.text.length() >= 2 * Patch_Margin) {
 						// Time for a new patch.
 						if (!patch.diffs.isEmpty()) {
-							patch_addContext(patch, prepatch_text);
+							patch.addContext(prepatch_text, Match_MaxBits, Patch_Margin);
 							patches.add(patch);
 							patch = new Patch();
 							// Unlike Unidiff, our patch lists have a rolling
@@ -1941,7 +1893,7 @@ public class DiffMatchPatch {
 		}
 		// Pick up the leftover patch if not empty.
 		if (!patch.diffs.isEmpty()) {
-			patch_addContext(patch, prepatch_text);
+			patch.addContext(prepatch_text, Match_MaxBits, Patch_Margin);
 			patches.add(patch);
 		}
 
@@ -2515,6 +2467,40 @@ public class DiffMatchPatch {
 				}
 			}
 			return unescapeForEncodeUriCompatability(text.toString());
+		}
+
+		/**
+		 * Increase the context until it is unique, but don't let the pattern expand beyond Match_MaxBits.
+		 * @param text  Source text.
+		 * @param Match_MaxBits
+		 * @param Patch_Margin
+		 */
+		public void addContext(String text, short Match_MaxBits, short Patch_Margin) {
+			if (text.length() == 0) {
+				return;
+			}
+			String pattern = text.substring(this.start2, this.start2 + this.length1);
+			int padding = 0;
+			while (text.indexOf(pattern) != text.lastIndexOf(pattern)
+					&& pattern.length() < Match_MaxBits - Patch_Margin - Patch_Margin) {
+				padding += Patch_Margin;
+				pattern = text.substring(Math.max(0, this.start2 - padding),
+						Math.min(text.length(), this.start2 + this.length1 + padding));
+			}
+			padding += Patch_Margin;
+			String prefix = text.substring(Math.max(0, this.start2 - padding), this.start2);
+			if (prefix.length() != 0) {
+				this.diffs.addFirst(new Diff(Operation.EQUAL, prefix));
+			}
+			String suffix = text.substring(this.start2 + this.length1,
+					Math.min(text.length(), this.start2 + this.length1 + padding));
+			if (suffix.length() != 0) {
+				this.diffs.addLast(new Diff(Operation.EQUAL, suffix));
+			}
+			this.start1 -= prefix.length();
+			this.start2 -= prefix.length();
+			this.length1 += prefix.length() + suffix.length();
+			this.length2 += prefix.length() + suffix.length();
 		}
 	}
 
