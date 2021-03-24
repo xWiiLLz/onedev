@@ -11,9 +11,10 @@ services:
       - 5432
 
   onedev:
-    build: ./deployment
+    image: 1dev/server:latest
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./deployment/hibernate.properties:/app/conf/hibernate.properties
       - onedev:/opt/onedev
     ports:
       - 6610
