@@ -11,7 +11,6 @@ services:
       - 5432
 
   onedev:
-    # image: 1dev/server:latest
     build: ./deployment
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -21,11 +20,6 @@ services:
       - 6611
     depends_on:
       - postgres
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 450M
 
   nginx:
     image: nginx:latest
