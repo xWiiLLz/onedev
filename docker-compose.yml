@@ -1,0 +1,15 @@
+version: "3.9"
+services:
+  onedev:
+    image: 1dev/server:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./onedev:/opt/onedev
+    ports:
+      - 6610:6610
+      - 6611:6611
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 450M
