@@ -14,7 +14,7 @@ services:
     build: ./deployment
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./onedev:/opt/onedev
+      - onedev:/opt/onedev
     ports:
       - 6610:6610
       - 6611:6611
@@ -25,3 +25,6 @@ services:
         limits:
           cpus: '0.5'
           memory: 450M
+
+volumes:
+  onedev:
