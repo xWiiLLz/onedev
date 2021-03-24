@@ -1,13 +1,25 @@
 version: "3.9"
 services:
+  postgres:
+    image: postgres:latest
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: onedev
+    ports:
+      - 5432
   onedev:
-    image: 1dev/server:latest
+    # image: 1dev/server:latest
+    build: ./deployment
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./onedev:/opt/onedev
     ports:
       - 6610:6610
       - 6611:6611
+    depends_on:
+      - postgres
     deploy:
       resources:
         limits:
