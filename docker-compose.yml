@@ -9,6 +9,7 @@ services:
       POSTGRES_DB: onedev
     ports:
       - 5432
+
   onedev:
     # image: 1dev/server:latest
     build: ./deployment
@@ -16,8 +17,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - onedev:/opt/onedev
     ports:
-      - 6610:6610
-      - 6611:6611
+      - 6610
+      - 6611
     depends_on:
       - postgres
     deploy:
@@ -25,6 +26,16 @@ services:
         limits:
           cpus: '0.5'
           memory: 450M
+
+  nginx:
+    image: nginx:latest
+    volumes:
+      - ./deployment/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - onedev
+    ports:
+      - 6610:6610
+      - 6611:6611
 
 volumes:
   onedev:
