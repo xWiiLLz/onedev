@@ -17,7 +17,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./deployment/hibernate.properties:/app/conf/hibernate.properties
-      - onedev:/opt/onedev
+      - /opt/onedev
+    # Only to better simulate horizontal scaling
     ports:
       - 6610
       - 6611
