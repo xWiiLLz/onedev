@@ -7,6 +7,8 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: onedev
+    volumes:
+      - db-data:/var/lib/postgresql/data
     ports:
       - 5432
 
@@ -15,7 +17,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./deployment/hibernate.properties:/app/conf/hibernate.properties
-      - onedev:/opt/onedev
+      - /opt/onedev
     ports:
       - 6610
       - 6611
@@ -33,4 +35,4 @@ services:
       - 6611:6611
 
 volumes:
-  onedev:
+  db-data:
