@@ -29,13 +29,15 @@ public class FieldOperatorCriteria extends FieldCriteria {
 
 	private static final long serialVersionUID = 1L;
 	
-	private final int operator;
+	private Operator operator;
+	private final boolean operatorSet;
 	
 	private final boolean allowMultiple;
 
 	public FieldOperatorCriteria(String name, int operator, boolean allowMultiple) {
 		super(name);
-		this.operator = operator;
+		this.setOperator(operator);
+		this.operatorSet = true;
 		this.allowMultiple = allowMultiple;
 	}
 
@@ -43,14 +45,14 @@ public class FieldOperatorCriteria extends FieldCriteria {
 	protected Predicate getValuePredicate(Join<?, ?> field, CriteriaBuilder builder) {
 		Path<?> valueAttribute = field.get(IssueField.PROP_VALUE);
 		Path<?> projectAttribute = field.getParent().get(Issue.PROP_PROJECT);		
-		if (operator == IssueQueryLexer.IsEmpty) {
+		if (getOperator() == IssueQueryLexer.IsEmpty) {
 			return null;
-		} else if (operator == IssueQueryLexer.IsMe) {
+		} else if (getOperator() == IssueQueryLexer.IsMe) {
 			if (User.get() != null)
 				return builder.equal(valueAttribute, User.get().getName());
 			else
 				throw new ExplicitException("Please login to perform this query");
-		} else if (operator == IssueQueryLexer.IsCurrent) {
+		} else if (getOperator() == IssueQueryLexer.IsCurrent) {
 			if (getFieldSpec() instanceof BuildChoiceField) {
 				Build build = Build.get();
 				if (build != null) { 
@@ -81,7 +83,7 @@ public class FieldOperatorCriteria extends FieldCriteria {
 			} else {
 				throw new IllegalStateException();
 			}
-		} else if (operator == IssueQueryLexer.IsPrevious) {
+		} else if (getOperator() == IssueQueryLexer.IsPrevious) {
 			if (getFieldSpec() instanceof BuildChoiceField) {
 				Build build = Build.get();
 				if (build != null) { 
@@ -107,65 +109,20 @@ public class FieldOperatorCriteria extends FieldCriteria {
 	@Override
 	public boolean matches(Issue issue) {
 		Object fieldValue = issue.getFieldValue(getFieldName());
-		if (operator == IssueQueryLexer.IsEmpty) {
-			return fieldValue == null;
-		} else if (operator == IssueQueryLexer.IsMe) {
-			if (User.get() != null)
-				return Objects.equals(fieldValue, User.get().getName());
-			else
-				throw new ExplicitException("Please login to perform this query");
-		} else if (operator == IssueQueryLexer.IsCurrent) {
-			if (getFieldSpec() instanceof BuildChoiceField) {
-				Build build = Build.get();
-				if (build != null) 
-					return build.getProject().equals(issue.getProject()) && build.getId().toString().equals(fieldValue);
-				else  
-					throw new ExplicitException("No build in query context");
-			} else if (getFieldSpec() instanceof PullRequestChoiceField) {
-				PullRequest request = PullRequest.get();
-				if (request != null) 
-					return request.getTargetProject().equals(issue.getProject()) && request.getId().toString().equals(fieldValue);
-				else  
-					throw new ExplicitException("No pull request in query context");
-			} else if (getFieldSpec() instanceof CommitField) {
-				ProjectScopedCommit commit = ProjectScopedCommit.get();
-				if (commit != null) 
-					return commit.getProject().equals(issue.getProject()) && commit.getCommitId().name().equals(fieldValue);
-				else  
-					throw new ExplicitException("No commit in query context");
-			} else {
-				throw new IllegalStateException();
-			}
-		} else if (operator == IssueQueryLexer.IsPrevious) {
-			if (getFieldSpec() instanceof BuildChoiceField) {
-				Build build = Build.get();
-				if (build != null) {
-					return build.getProject().equals(issue.getProject()) 
-							&& build.getStreamPreviousNumbers(EntityCriteria.IN_CLAUSE_LIMIT)
-								.stream()
-								.anyMatch(it->it.equals(fieldValue));
-				} else {
-					throw new ExplicitException("No build in query context");
-				}
-			} else {
-				throw new IllegalStateException();
-			}
-		} else {
-			throw new IllegalSelectorException();
-		}
+		return operator.matches(issue, fieldValue, this);
 	}
 
 	@Override
 	public String toStringWithoutParens() {
-		return quote(getFieldName()) + " " + IssueQuery.getRuleName(operator);
+		return quote(getFieldName()) + " " + IssueQuery.getRuleName(getOperator());
 	}
 
 	@SuppressWarnings({"unchecked" })
 	@Override
 	public void fill(Issue issue) {
-		if (operator == IssueQueryLexer.IsEmpty) {
+		if (getOperator() == IssueQueryLexer.IsEmpty) {
 			issue.setFieldValue(getFieldName(), null);
-		} else if (operator == IssueQueryLexer.IsMe) {
+		} else if (getOperator() == IssueQueryLexer.IsMe) {
 			if (allowMultiple) {
 				List<String> valueFromIssue = (List<String>) issue.getFieldValue(getFieldName());
 				if (valueFromIssue == null)
@@ -176,6 +133,23 @@ public class FieldOperatorCriteria extends FieldCriteria {
 				issue.setFieldValue(getFieldName(), SecurityUtils.getUser().getName());
 			}
 		}
+	}
+
+	public void setOperator(int operator) {
+		if (this.operatorSet) return;
+		if (operator == IssueQueryLexer.IsPrevious)
+			this.operator = new IsPrevious();
+		if (operator == IssueQueryLexer.IsCurrent)
+			this.operator = new IsCurrent();
+		if (operator == IssueQueryLexer.IsMe)
+			this.operator = new IsMe();
+		if (operator == IssueQueryLexer.IsEmpty)
+			this.operator = new IsEmpty();
+		this.operator = null;		
+	}
+
+	public int getOperator() {
+		return operator.getOperator();
 	}
 
 }
